@@ -7,7 +7,7 @@
 # pip3 install python-openstackclient
 
 # If you have any error while launchging openstack command :
-#Â openstack --debug --help
+#Êopenstack --debug --help
 # for me the fix was :
 # pip3 install six --upgrade
 
@@ -40,8 +40,8 @@ else
 fi
 
 # Export the emails from & to
-EMAIL_FROM="$LOG_EMAIL_FROM"
-EMAIL_TO="$LOG_EMAIL_TO"
+EMAIL_FROM="openstack.cnds.unibe.ch@inf.unibe.ch"
+EMAIL_TO="alissonp.medeiros@inf.unibe.ch"
 
 # backup_type
 BACKUP_TYPE="${1}"
@@ -57,29 +57,51 @@ FILENAME='backupHistory.txt'
 #define the number of backups you want to maintain
 BACKUPS=3
 BACKUP_NAME="backup-$(date "+%Y%m%d%H%M")"
-SNAPSHOT_DIRECTORY="/var/lib/glance-external/snapshots/"
+SNAPSHOT_DIRECTORY="/var/lib/glance/snapshots/"
+BACKUP1_DIRECTORY="/var/lib/backup/backup1/"
+BACKUP2_DIRECTORY="/var/lib/backup/backup2/"
 
 check_backup(){
-  echo -e "\n\nINFO: checking backup"
+  echo -e "\nINFO: Checking backup"
   #count number of lines
   FILE_LINES=$(grep "" -c $FILE_DIRECTORY$FILENAME)
   for (( i=1; i<=$FILE_LINES-$BACKUPS; i++ ))
   do
     DESTROY_BACKUP=$(head -1 $FILE_DIRECTORY$FILENAME)
-    echo "the following backup will be destroyed: $DESTROY_BACKUP"
+    echo "INFO: The following backup will be destroyed: $DESTROY_BACKUP"
     #remove first line of the file
     echo "$(tail -n +2 $FILE_DIRECTORY$FILENAME)" > ${FILE_DIRECTORY}${FILENAME}
-    echo "rm -rf ${SNAPSHOT_DIRECTORY}${DESTROY_BACKUP}"
-    rm -rf ${SNAPSHOT_DIRECTORY}${DESTROY_BACKUP}
+    
+    echo -e "INFO: Removing backup $DESTROY_BACKUP in storage server CDS-STORAGE1:"
+    ssh -p 2711 root@130.92.70.135 'rm -rf '${BACKUP2_DIRECTORY}${DESTROY_BACKUP}
+
+    echo -e "INFO: Removing backup $DESTROY_BACKUP in storage server CDS-STORAGE2:"
+    #rm -rf ${BACKUP1_DIRECTORY}${DESTROY_BACKUP}
+    ssh -p 2711 root@130.92.70.135 'rsync -avh '$BACKUP2_DIRECTORY $BACKUP1_DIRECTORY ' --delete'
+
   done
 
 }
 
 add_backup(){
   #add in the end of the file
-  echo "INFO: updating file ${FILENAME}"
-  echo "the following backup will be included:"
+  echo -e "\n\nINFO: updating file ${FILENAME}"
+  echo "INFO: The following backup will be included:"
   echo "$BACKUP_NAME"  | tee -a ${FILE_DIRECTORY}${FILENAME}
+}
+
+saving_backup() {
+  echo -e "\nINFO: Creating backup directory $BACKUP_NAME in storage server CDS-STORAGE1:"
+  #echo "mkdir ${BACKUP2_DIRECTORY}${BACKUP_NAME}"
+  ssh -p 2711 root@130.92.70.135 'mkdir '${BACKUP2_DIRECTORY}${BACKUP_NAME}
+
+  echo -e "INFO: sending snapshot to CDS-STORAGE1"
+  scp -P 2711 "${SNAPSHOT_DIRECTORY}${1}".qcow2 root@130.92.70.135:"$BACKUP2_DIRECTORY""${BACKUP_NAME}"
+
+  echo -e "INFO: synchronizing backup directory $BACKUP_NAME in storage server CDS-STORAGE2:"
+  #echo "mkdir ${BACKUP1_DIRECTORY}${BACKUP_NAME}"
+  #mkdir ${BACKUP1_DIRECTORY}${BACKUP_NAME}
+  ssh -p 2711 root@130.92.70.135 'rsync -r ' $BACKUP2_DIRECTORY $BACKUP1_DIRECTORY
 }
 
 
@@ -90,9 +112,6 @@ launch_instances_backups () {
     
     add_backup
     
-    echo -e "\n\nINFO: Creating weekly backup directory:"
-    echo "mkdir ${SNAPSHOT_DIRECTORY}${BACKUP_NAME}"
-    mkdir ${SNAPSHOT_DIRECTORY}${BACKUP_NAME}
 
     for instance in "${arrOutput[@]}"; do
       set -- "$instance"
@@ -108,30 +127,27 @@ launch_instances_backups () {
       SNAPSHOT_NAME="snapshot-$(date "+%Y%m%d%H%M")-${BACKUP_TYPE}-${INSTANCE_NAME}"
       
 
-      echo -e "INFO: Start OpenStack snapshot creation : ${INSTANCE_NAME}"
+      echo -e "\nINFO: Start OpenStack snapshot creation : ${INSTANCE_NAME}"
 
-      if [ "$DRY_RUN" = "--dry-run" ] ; then
-        #echo "DRY-RUN is enabled. In real a backup of the instance called ${SNAPSHOT_NAME} would've been done like that :
-        echo "simulation:
-        openstack server backup create ${INSTANCE_UUID} --name ${SNAPSHOT_NAME} --type ${BACKUP_TYPE} --rotate ${ROTATION} --wait
-        glance image-download ${SNAPSHOT_NAME} --file ${SNAPSHOT_DIRECTORY}${BACKUP_NAME}/${SNAPSHOT_NAME}.qcow2
-        openstack image delete ${SNAPSHOT_NAME}"
-        
-      else
-        echo -e "INFO: command -> openstack server image create "${INSTANCE_UUID}" --name "${SNAPSHOT_NAME}" --wait"
-        openstack server image create "${INSTANCE_UUID}" --name "${SNAPSHOT_NAME}" --wait
-        sleep 3
-        aux=$(openstack --os-image-api-version 2 image show ${SNAPSHOT_NAME} | sed -n 's/|\s*id\s*|\s*\(.*[^\s]\)\s*|/\1/p')
-        SNAPSHOT_ID=$(echo "$aux" | sed 's/[[:space:]]//g')
-        echo -e "INFO: downloading image with following command:"
-        glance image-download "${SNAPSHOT_ID}" --file "${SNAPSHOT_DIRECTORY}""${BACKUP_NAME}"/"${SNAPSHOT_NAME}".qcow2
-        echo -e "Removing image ${SNAPSHOT_NAME} from openstack"
-        openstack image delete ${SNAPSHOT_NAME}
-      fi
+      #echo -e "INFO: command -> openstack server image create "${INSTANCE_UUID}" --name "${SNAPSHOT_NAME}" --wait"
+      openstack server image create "${INSTANCE_UUID}" --name "${SNAPSHOT_NAME}" --wait
+      sleep 3
+      aux=$(openstack --os-image-api-version 2 image show ${SNAPSHOT_NAME} | sed -n 's/|\s*id\s*|\s*\(.*[^\s]\)\s*|/\1/p')
+      SNAPSHOT_ID=$(echo "$aux" | sed 's/[[:space:]]//g')
+      echo -e "\nINFO: downloading image ${SNAPSHOT_ID}"
+      glance image-download "${SNAPSHOT_ID}" --file "${SNAPSHOT_DIRECTORY}""${SNAPSHOT_NAME}".qcow2
+      echo -e "\nINFO: Removing image ${SNAPSHOT_NAME} from openstack"
+      openstack image delete ${SNAPSHOT_NAME}
+
+      saving_backup $SNAPSHOT_NAME
+
+      echo -e "\nINFO: deleting "${SNAPSHOT_NAME}".qcow2"
+      rm -rf "${SNAPSHOT_DIRECTORY}""${SNAPSHOT_NAME}".qcow2
+
       if [[ "$?" != 0 ]]; then
         cat tmp_error.log >> openstack_errors.log
       else
-        echo "SUCCESS: Backup image created and uploaded."
+        echo -e "\nSUCCESS: Backup image created and uploaded."
       fi
     done
 
@@ -145,6 +161,8 @@ launch_instances_backups () {
 send_errors_if_there_are () {
   if [ -f openstack_errors.log ]; then
     echo -e "ERRORS:\n\n$(cat openstack_errors.log)" | mail -s "Snapshot errors" -aFrom:Backup\<$EMAIL_FROM\> "$EMAIL_TO"
+  else
+    echo "The backup has been created successfully" | mail -s "Openstack Backup" $EMAIL_TO
   fi
 }
 
