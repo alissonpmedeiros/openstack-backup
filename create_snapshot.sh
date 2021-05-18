@@ -88,13 +88,13 @@ add_backup(){
   echo -e "\n\nINFO: updating file ${FILENAME}"
   echo "INFO: The following backup will be included:"
   echo "$BACKUP_NAME"  | tee -a ${FILE_DIRECTORY}${FILENAME}
-}
 
-saving_backup() {
   echo -e "\nINFO: Creating backup directory $BACKUP_NAME in storage server CDS-STORAGE1:"
   #echo "mkdir ${BACKUP2_DIRECTORY}${BACKUP_NAME}"
   ssh -p 2711 root@130.92.70.135 'mkdir '${BACKUP2_DIRECTORY}${BACKUP_NAME}
+}
 
+saving_backup() {
   echo -e "INFO: sending snapshot to CDS-STORAGE1"
   scp -P 2711 "${SNAPSHOT_DIRECTORY}${1}".qcow2 root@130.92.70.135:"$BACKUP2_DIRECTORY""${BACKUP_NAME}"
 
@@ -106,13 +106,10 @@ saving_backup() {
 
 
 launch_instances_backups () {
-  if output=$(openstack server list | awk -F'|' '/\|/ && !/ID/{system("echo "$2"__"$3"")}'); then
+  if output=$(openstack server list --all-projects | awk -F'|' '/\|/ && !/ID/{system("echo "$2"__"$3"")}'); then
     set -- "$output"
     IFS=$'\n'; declare -a arrOutput=($*)
     
-    add_backup
-    
-
     for instance in "${arrOutput[@]}"; do
       set -- "$instance"
       IFS=__; declare arrInstance=($*)
@@ -126,8 +123,8 @@ launch_instances_backups () {
       # snapshot names will sort by date, instance_name and UUID.
       SNAPSHOT_NAME="snapshot-$(date "+%Y%m%d%H%M")-${BACKUP_TYPE}-${INSTANCE_NAME}"
       
-
-      echo -e "\nINFO: Start OpenStack snapshot creation : ${INSTANCE_NAME}"
+      echo -e "\n\n###############################################################################"
+      echo -e "\nINFO: Start OpenStack snapshot of instance: ${INSTANCE_NAME}"
 
       #echo -e "INFO: command -> openstack server image create "${INSTANCE_UUID}" --name "${SNAPSHOT_NAME}" --wait"
       openstack server image create "${INSTANCE_UUID}" --name "${SNAPSHOT_NAME}" --wait
@@ -149,6 +146,7 @@ launch_instances_backups () {
       else
         echo -e "\nSUCCESS: Backup image created and uploaded."
       fi
+      echo -e "\n###############################################################################"
     done
 
   else
@@ -169,6 +167,7 @@ send_errors_if_there_are () {
 if [ -f openstack_errors.log ]; then
   rm openstack_errors.log
 fi
+add_backup
 launch_instances_backups
 #send_errors_if_there_are
 #bash "$SCRIPTPATH/count_volume_snapshots.sh" "$ROTATION"
