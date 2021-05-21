@@ -55,7 +55,7 @@ ROTATION="${2}"
 FILE_DIRECTORY="/root/backup/"
 FILENAME='backupHistory.txt'
 #define the number of backups you want to maintain
-BACKUPS=3
+BACKUPS=5
 BACKUP_NAME="backup-$(date "+%Y%m%d%H%M")"
 SNAPSHOT_DIRECTORY="/var/lib/glance/snapshots/"
 BACKUP1_DIRECTORY="/var/lib/backup/backup1/"
@@ -75,9 +75,11 @@ check_backup(){
     echo -e "INFO: Removing backup $DESTROY_BACKUP in storage server CDS-STORAGE1:"
     ssh -p 2711 root@130.92.70.135 'rm -rf '${BACKUP2_DIRECTORY}${DESTROY_BACKUP}
 
-    echo -e "INFO: Removing backup $DESTROY_BACKUP in storage server CDS-STORAGE2:"
+    #echo -e "INFO: Removing backup $DESTROY_BACKUP in storage server CDS-STORAGE2:"
     #rm -rf ${BACKUP1_DIRECTORY}${DESTROY_BACKUP}
-    ssh -p 2711 root@130.92.70.135 'rsync -avh '$BACKUP2_DIRECTORY $BACKUP1_DIRECTORY ' --delete'
+
+    echo -e "INFO: synchronizing backup directory $BACKUP_NAME in storage server CDS-STORAGE2:"
+    ssh -p 2711 root@130.92.70.135 'rsync -avh -z '$BACKUP2_DIRECTORY $BACKUP1_DIRECTORY ' --delete'
 
   done
 
@@ -98,10 +100,10 @@ saving_backup() {
   echo -e "INFO: sending snapshot to CDS-STORAGE1"
   scp -P 2711 "${SNAPSHOT_DIRECTORY}${1}".qcow2 root@130.92.70.135:"$BACKUP2_DIRECTORY""${BACKUP_NAME}"
 
-  echo -e "INFO: synchronizing backup directory $BACKUP_NAME in storage server CDS-STORAGE2:"
+  #echo -e "INFO: synchronizing backup directory $BACKUP_NAME in storage server CDS-STORAGE2:"
   #echo "mkdir ${BACKUP1_DIRECTORY}${BACKUP_NAME}"
   #mkdir ${BACKUP1_DIRECTORY}${BACKUP_NAME}
-  ssh -p 2711 root@130.92.70.135 'rsync -r ' $BACKUP2_DIRECTORY $BACKUP1_DIRECTORY
+  #ssh -p 2711 root@130.92.70.135 'rsync -r ' $BACKUP2_DIRECTORY $BACKUP1_DIRECTORY
 }
 
 
